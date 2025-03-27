@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Space Attack Demo</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        background: black;
+        overflow: hidden;
+      }
+
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+      let aKeyPulse = 0;
+      let dKeyPulse = 0;
+
+      let input = null;
+
+      const bullets = [];
+
+      const BULLET_SPEED = 5;
+      const BULLET_LIFETIME = 120;
+
+      const damping = 0.999;
+      const maxSpeed = 3;
+
+      const ship = {
+        x: 400,
+        y: 300,
+        angle: 0,
+        velocityX: 0,
+        velocityY: 0,
+      };
+
+      function shoot() {
+        const rad = ((ship.angle - 90) * Math.PI) / 180;
+
+        const bulletOriginX = ship.x + Math.cos(rad) * 20;
+        const bulletOriginY = ship.y + Math.sin(rad) * 20;
+
+        bullets.push({
+          x: bulletOriginX,
+          y: bulletOriginY,
+          vx: Math.cos(rad) * BULLET_SPEED,
+          vy: Math.sin(rad) * BULLET_SPEED,
+          life: BULLET_LIFETIME,
+        });
+      }
+
+      function draw() {
+        const { x, y, angle, velocityX, velocityY } = ship;
+
+        // Limpa a tela
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Texto de debug
+        ctx.fillStyle = "white";
+        ctx.font = "14px monospace";
+        ctx.fillText(`Force: ${input?.force?.toFixed(2) ?? 0}`, 10, 20);
+        ctx.fillText(`Angle: ${input?.angle?.degree?.toFixed(2) ?? 0}`, 10, 40);
+
+        // Demo
+        ctx.fillStyle = "white";
+        ctx.font = "14px monospace";
+        ctx.fillText(`DEMO ONLY`, x - 30, 20);
+
+        // Desenha a nave (triângulo)
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate((angle * Math.PI) / 180);
+        ctx.beginPath();
+        ctx.arc(0, -20, 3, 0, Math.PI * 2); // Ponta da nave (posição relativa)
+        ctx.fillStyle = "red";
+        ctx.fill();
+        ctx.moveTo(0, -20); // ponta
+        ctx.lineTo(14, 20);
+        ctx.lineTo(-14, 20);
+        ctx.closePath();
+        ctx.strokeStyle = "white";
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.fillStyle = "white";
+        for (const bullet of bullets) {
+          ctx.beginPath();
+          ctx.arc(bullet.x, bullet.y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      function update() {
+        const ROTATION_PULSE_SCALE = 1.5; // quanto cada pulso afeta o ângulo
+        const PULSE_DECAY = 0.84; // quanto decai a cada frame
+
+        // Joystick tem prioridade
+        if (input && input.force > 0.1) {
+          ship.angle = -input.angle.degree + 90;
+        } else {
+          // Se não tiver joystick ativo, usamos pulsos de teclado
+          ship.angle -= aKeyPulse * ROTATION_PULSE_SCALE;
+          ship.angle += dKeyPulse * ROTATION_PULSE_SCALE;
+
+          // Decaimento dos pulsos ao longo do tempo
+          aKeyPulse *= PULSE_DECAY;
+          dKeyPulse *= PULSE_DECAY;
+
+          // Zera se ficar muito pequeno
+          if (aKeyPulse < 0.01) aKeyPulse = 0;
+          if (dKeyPulse < 0.01) dKeyPulse = 0;
+        }
+
+        // Atualiza as balas
+        for (let i = bullets.length - 1; i >= 0; i--) {
+          const bullet = bullets[i];
+          bullet.x += bullet.vx;
+          bullet.y += bullet.vy;
+          bullet.life--;
+
+          if (
+            bullet.life <= 0 ||
+            bullet.x < 0 ||
+            bullet.x > canvas.width ||
+            bullet.y < 0 ||
+            bullet.y > canvas.height
+          ) {
+            bullets.splice(i, 1);
+          }
+        }
+      }
+
+      function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+      }
+
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        ship.x = canvas.width / 2;
+        ship.y = canvas.height / 2;
+      }
+
+      function initGame() {
+        resizeCanvas();
+        ship.x = canvas.width / 2;
+        ship.y = canvas.height / 2;
+        loop();
+      }
+
+      // Chama isso ao carregar
+      window.addEventListener("load", initGame);
+      window.addEventListener("resize", resizeCanvas);
+
+      window.addEventListener("keyboard", (e) => {
+        console.info("event::keyboard", e);
+        switch (e.detail.key) {
+          case "space":
+          case "5":
+            shoot();
+            break;
+          case "a":
+          case "arrowleft":
+            aKeyPulse += 2;
+            break;
+          case "d":
+          case "arrowright":
+            dKeyPulse += 2;
+            break;
+        }
+      });
+    </script>
+    <script>
+      window.addEventListener("message", (event) => {
+        console.info("message:event", {
+          origin: event.origin,
+          data: event.data,
+        });
+      });
+    </script>
+  </body>
+</html>
