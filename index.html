@@ -24,22 +24,10 @@
   </head>
   <body>
     <canvas id="gameCanvas"></canvas>
-
     <script>
       const canvas = document.getElementById("gameCanvas");
       const ctx = canvas.getContext("2d");
-      let aKeyPulse = 0;
-      let dKeyPulse = 0;
-
-      let input = null;
-
-      const bullets = [];
-
-      const BULLET_SPEED = 5;
-      const BULLET_LIFETIME = 120;
-
-      const damping = 0.999;
-      const maxSpeed = 3;
+      let lastKeys = new Set();
 
       const ship = {
         x: 400,
@@ -48,102 +36,529 @@
         velocityX: 0,
         velocityY: 0,
       };
+      const ACCELERATION = 0.2;
+      const MAX_ACCELERATION = 5;
+      const COLOR_EXPLOSION = "white";
+      const DAMAGE_DURATION = 3000; // 3 segundos
+      const BLINK_INTERVAL = 200; // intervalo de piscar
+      const CONFIRM_KEY = "enter";
+      let FINAL_EXPLOSION_DONE = false;
+      let IS_SHIELDED = false;
+      const SHIELD_DURATION = 5000;
+      let promptTime = 0;
+
+      let input = null;
+      let aKeyPulse = 0;
+      let dKeyPulse = 0;
+      let pressedKeys = {};
+      let shootInterval = null;
+      const SHOOT_INTERVAL_MS = 150;
+      let lastShootTime = 0;
+      let blinkPrompt = true;
+
+      const bullets = [];
+      const BULLET_SPEED = 10;
+      const BULLET_LIFETIME = 200;
+
+      const enemies = [];
+      const ENEMY_SPAWN_INTERVAL = 4000;
+      const ENEMY_SPEED = 1.5;
+      const ENEMY_SHOOT_INTERVAL = 2000;
+      const ENEMY_BULLET_SPEED = 3;
+      const ENEMY_BULLET_LIFETIME = 150;
+      const enemyBullets = [];
+      const SHOOT_OFFSET = 20;
+      let IS_DEAD = false;
+      let SHOW_FINALSCREEN = false;
+
+      const explosions = [];
+      const MAX_LIVES = 5;
+      let LIVES = MAX_LIVES;
+      let IS_GAMEOVER = false;
+      let SCORE = 0;
+
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        ship.x = canvas.width / 2;
+        ship.y = canvas.height / 2;
+      }
+
+      function bindInputEvents() {
+        const keys = [
+          "a",
+          "arrowleft",
+          "d",
+          "arrowright",
+          "space",
+          "5",
+          "s",
+          "arrowdown",
+          "w",
+          "enter",
+          "arrowup",
+          "8",
+        ];
+        keys.forEach((key) => {
+          window.addEventListener("keydown:" + key, () => {
+            pressedKeys[key] = true;
+            if (!IS_DEAD) {
+              if ((key === "space" || key === "5") && !shootInterval) {
+                shoot();
+                lastShootTime = Date.now();
+                shootInterval = setInterval(() => {
+                  const now = Date.now();
+                  if (now - lastShootTime >= SHOOT_INTERVAL_MS) {
+                    shoot();
+                  }
+                }, SHOOT_INTERVAL_MS);
+              } else if (key === "space" || key === "5") {
+                const now = Date.now();
+                if (now - lastShootTime >= 0) {
+                  shoot();
+                  lastShootTime = now;
+                }
+              }
+            }
+          });
+          window.addEventListener("keyup:" + key, () => {
+            pressedKeys[key] = false;
+            if (key === "space" || key === "5") {
+              clearInterval(shootInterval);
+              shootInterval = null;
+            }
+          });
+        });
+      }
 
       function shoot() {
+        if (IS_DEAD) return;
         const rad = ((ship.angle - 90) * Math.PI) / 180;
-
-        const bulletOriginX = ship.x + Math.cos(rad) * 20;
-        const bulletOriginY = ship.y + Math.sin(rad) * 20;
-
         bullets.push({
-          x: bulletOriginX,
-          y: bulletOriginY,
+          x: ship.x + Math.cos(rad) * 20,
+          y: ship.y + Math.sin(rad) * 20,
           vx: Math.cos(rad) * BULLET_SPEED,
           vy: Math.sin(rad) * BULLET_SPEED,
           life: BULLET_LIFETIME,
         });
       }
 
-      function draw() {
-        const { x, y, angle, velocityX, velocityY } = ship;
+      function spawnEnemy() {
+        const side = Math.floor(Math.random() * 4);
+        let x, y;
+        switch (side) {
+          case 0:
+            x = -20;
+            y = Math.random() * canvas.height;
+            break;
+          case 1:
+            x = canvas.width + 20;
+            y = Math.random() * canvas.height;
+            break;
+          case 2:
+            x = Math.random() * canvas.width;
+            y = -20;
+            break;
+          case 3:
+            x = Math.random() * canvas.width;
+            y = canvas.height + 20;
+            break;
+        }
+        const dx = ship.x - x;
+        const dy = ship.y - y;
+        const angle = Math.atan2(dy, dx);
+        enemies.push({
+          x,
+          y,
+          vx: Math.cos(angle) * ENEMY_SPEED,
+          vy: Math.sin(angle) * ENEMY_SPEED,
+          angle: (angle * 180) / Math.PI + 90,
+          waveOffset: Math.random() * Math.PI * 2,
+          time: 0,
+          lastShoot: 0,
+          curve: 0.3 + Math.random() * 0.7,
+        });
+      }
 
-        // Limpa a tela
-        ctx.fillStyle = "black";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      function createExplosion(x, y, color = "white") {
+        for (let i = 0; i < 20; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = Math.random() * 2 + 1;
+          explosions.push({
+            x,
+            y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 30 + Math.random() * 10,
+            color,
+          });
+        }
+      }
 
-        // Texto de debug
-        ctx.fillStyle = "white";
-        ctx.font = "14px monospace";
-        ctx.fillText(`Force: ${input?.force?.toFixed(2) ?? 0}`, 10, 20);
-        ctx.fillText(`Angle: ${input?.angle?.degree?.toFixed(2) ?? 0}`, 10, 40);
+      function wrapPosition(obj) {
+        if (obj.x < 0) obj.x = canvas.width;
+        else if (obj.x > canvas.width) obj.x = 0;
+        if (obj.y < 0) obj.y = canvas.height;
+        else if (obj.y > canvas.height) obj.y = 0;
+      }
 
-        // Demo
-        ctx.fillStyle = "white";
-        ctx.font = "14px monospace";
-        ctx.fillText(`DEMO ONLY`, x - 30, 20);
+      // Adicionando variáveis de estado de dano globais
+      let IS_INVULNERABLE = false;
+      let BLINKSTATE = false;
+      let damageStartTime = 0;
 
-        // Desenha a nave (triângulo)
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate((angle * Math.PI) / 180);
-        ctx.beginPath();
-        ctx.arc(0, -20, 3, 0, Math.PI * 2); // Ponta da nave (posição relativa)
-        ctx.fillStyle = "red";
-        ctx.fill();
-        ctx.moveTo(0, -20); // ponta
-        ctx.lineTo(14, 20);
-        ctx.lineTo(-14, 20);
-        ctx.closePath();
-        ctx.strokeStyle = "white";
-        ctx.stroke();
-        ctx.restore();
+      function handleDamage() {
+        IS_INVULNERABLE = true;
+        damageStartTime = Date.now();
 
-        ctx.fillStyle = "white";
-        for (const bullet of bullets) {
-          ctx.beginPath();
-          ctx.arc(bullet.x, bullet.y, 2, 0, Math.PI * 2);
-          ctx.fill();
+        const blinkTimer = setInterval(() => {
+          BLINKSTATE = !BLINKSTATE;
+        }, BLINK_INTERVAL);
+
+        setTimeout(() => {
+          IS_INVULNERABLE = false;
+          clearInterval(blinkTimer);
+          BLINKSTATE = false;
+
+          // Ativa o escudo de proteção por 3 segundos
+          IS_SHIELDED = true;
+          setTimeout(() => {
+            IS_SHIELDED = false;
+          }, SHIELD_DURATION);
+        }, DAMAGE_DURATION);
+
+        LIVES = Math.max(0, LIVES - 1);
+
+        if (LIVES <= 0 && !IS_GAMEOVER) {
+          IS_DEAD = true;
+          IS_INVULNERABLE = true;
+          setTimeout(() => {
+            IS_GAMEOVER = true;
+            SHOW_FINALSCREEN = true;
+          }, DAMAGE_DURATION);
         }
       }
 
       function update() {
-        const ROTATION_PULSE_SCALE = 1.5; // quanto cada pulso afeta o ângulo
-        const PULSE_DECAY = 0.84; // quanto decai a cada frame
+        const ROTATION_PULSE_SCALE = 1.5;
+        const PULSE_DECAY = 0.86;
 
-        // Joystick tem prioridade
         if (input && input.force > 0.1) {
           ship.angle = -input.angle.degree + 90;
         } else {
-          // Se não tiver joystick ativo, usamos pulsos de teclado
+          if (!IS_DEAD) {
+            if (pressedKeys["a"] || pressedKeys["arrowleft"]) aKeyPulse += 0.5;
+            if (pressedKeys["d"] || pressedKeys["arrowright"]) dKeyPulse += 0.5;
+          }
           ship.angle -= aKeyPulse * ROTATION_PULSE_SCALE;
           ship.angle += dKeyPulse * ROTATION_PULSE_SCALE;
-
-          // Decaimento dos pulsos ao longo do tempo
           aKeyPulse *= PULSE_DECAY;
           dKeyPulse *= PULSE_DECAY;
-
-          // Zera se ficar muito pequeno
           if (aKeyPulse < 0.01) aKeyPulse = 0;
           if (dKeyPulse < 0.01) dKeyPulse = 0;
         }
 
-        // Atualiza as balas
-        for (let i = bullets.length - 1; i >= 0; i--) {
-          const bullet = bullets[i];
-          bullet.x += bullet.vx;
-          bullet.y += bullet.vy;
-          bullet.life--;
+        const rad = ((ship.angle - 90) * Math.PI) / 180;
 
-          if (
-            bullet.life <= 0 ||
-            bullet.x < 0 ||
-            bullet.x > canvas.width ||
-            bullet.y < 0 ||
-            bullet.y > canvas.height
-          ) {
-            bullets.splice(i, 1);
+        if (
+          !IS_DEAD &&
+          (pressedKeys["w"] || pressedKeys["arrowup"] || pressedKeys["8"])
+        ) {
+          ship.velocityX += Math.cos(rad) * ACCELERATION;
+          ship.velocityY += Math.sin(rad) * ACCELERATION;
+        }
+        const speed = Math.sqrt(ship.velocityX ** 2 + ship.velocityY ** 2);
+        if (speed > MAX_ACCELERATION) {
+          const factor = MAX_ACCELERATION / speed;
+          ship.velocityX *= factor;
+          ship.velocityY *= factor;
+        }
+        ship.x += ship.velocityX;
+        ship.y += ship.velocityY;
+        ship.velocityX *= 0.99;
+        ship.velocityY *= 0.99;
+
+        if (pressedKeys["s"]) {
+          ship.velocityX *= 0.96;
+          ship.velocityY *= 0.96;
+        }
+
+        wrapPosition(ship);
+
+        for (let i = bullets.length - 1; i >= 0; i--) {
+          const b = bullets[i];
+          b.x += b.vx;
+          b.y += b.vy;
+          b.life--;
+          if (b.life <= 0) bullets.splice(i, 1);
+          for (let j = enemies.length - 1; j >= 0; j--) {
+            const e = enemies[j];
+            const dx = b.x - e.x,
+              dy = b.y - e.y;
+            if (Math.sqrt(dx * dx + dy * dy) < 18) {
+              createExplosion(e.x, e.y, COLOR_EXPLOSION);
+              createExplosion(e.x, e.y, "yellow");
+              bullets.splice(i, 1);
+              enemies.splice(j, 1);
+              SCORE += 5;
+              break;
+            }
           }
         }
+
+        for (let i = enemies.length - 1; i >= 0; i--) {
+          const e = enemies[i];
+          e.time += 0.05;
+          const baseAngle = Math.atan2(e.vy, e.vx);
+          const waveAngle = baseAngle + Math.PI / 2;
+          const offsetX =
+            Math.cos(waveAngle) * Math.sin(e.time + e.waveOffset) * e.curve;
+          const offsetY =
+            Math.sin(waveAngle) * Math.sin(e.time + e.waveOffset) * e.curve;
+          e.x += e.vx + offsetX;
+          e.y += e.vy + offsetY;
+          wrapPosition(e);
+
+          const dx = e.x - ship.x,
+            dy = e.y - ship.y;
+
+          if (!IS_DEAD) {
+            if (Math.sqrt(dx * dx + dy * dy) < 20) {
+              createExplosion(e.x, e.y, COLOR_EXPLOSION);
+              createExplosion(e.x, e.y, "yellow");
+              enemies.splice(i, 1);
+
+              // Adiciona lógica de dano
+              if (!IS_INVULNERABLE && !IS_SHIELDED) {
+                handleDamage();
+              }
+            }
+          }
+
+          if (Date.now() - e.lastShoot > ENEMY_SHOOT_INTERVAL) {
+            const dx = ship.x - e.x;
+            const dy = ship.y - e.y;
+            const angle = Math.atan2(dy, dx);
+
+            enemyBullets.push({
+              x: e.x + Math.cos(angle) * SHOOT_OFFSET,
+              y: e.y + Math.sin(angle) * SHOOT_OFFSET,
+              vx: Math.cos(angle) * ENEMY_BULLET_SPEED,
+              vy: Math.sin(angle) * ENEMY_BULLET_SPEED,
+              life: ENEMY_BULLET_LIFETIME,
+            });
+
+            e.lastShoot = Date.now();
+          }
+        }
+
+        for (let i = enemyBullets.length - 1; i >= 0; i--) {
+          const b = enemyBullets[i];
+          b.x += b.vx;
+          b.y += b.vy;
+          b.life--;
+          const dx = b.x - ship.x,
+            dy = b.y - ship.y;
+
+          if (!IS_DEAD) {
+            if (Math.sqrt(dx * dx + dy * dy) < 15) {
+              createExplosion(ship.x, ship.y, COLOR_EXPLOSION);
+              createExplosion(ship.x, ship.y, "yellow");
+
+              enemyBullets.splice(i, 1);
+
+              // Adiciona lógica de dano
+              if (!IS_INVULNERABLE && !IS_SHIELDED) {
+                handleDamage();
+              }
+              continue;
+            }
+          }
+
+          if (
+            b.life <= 0 ||
+            b.x < 0 ||
+            b.x > canvas.width ||
+            b.y < 0 ||
+            b.y > canvas.height
+          ) {
+            enemyBullets.splice(i, 1);
+          }
+        }
+
+        for (let i = explosions.length - 1; i >= 0; i--) {
+          const p = explosions[i];
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vx *= 0.98;
+          p.vy *= 0.98;
+          p.life--;
+          if (p.life <= 0) explosions.splice(i, 1);
+        }
+
+        if (LIVES <= 0 && !IS_GAMEOVER) {
+          IS_DEAD = true;
+          IS_INVULNERABLE = true;
+
+          setTimeout(() => {
+            IS_INVULNERABLE = false;
+            IS_GAMEOVER = true;
+            SHOW_FINALSCREEN = true; // nova flag
+          }, DAMAGE_DURATION);
+        }
+
+        promptTime += 0.05;
+      }
+
+      function draw() {
+        ctx.fillStyle =
+          IS_INVULNERABLE && BLINKSTATE ? "rgba(80,0,0,1)" : "black";
+
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "white";
+        ctx.textAlign = "start";
+        ctx.font = "18px monospace";
+        ctx.fillText("VIDAS: " + LIVES, canvas.width / 2 - 50, 60);
+        ctx.fillText("SCORE: " + SCORE, canvas.width / 2 - 50, 85);
+
+        if (IS_GAMEOVER && SHOW_FINALSCREEN) {
+          showGameOverScreen();
+        }
+
+        if (!IS_GAMEOVER) {
+          ctx.save();
+          ctx.translate(ship.x, ship.y);
+          ctx.rotate((ship.angle * Math.PI) / 180);
+
+          // Modificação para piscar em caso de dano
+          if (IS_INVULNERABLE && BLINKSTATE) {
+            // Nave piscando com vermelho semi-transparente
+            ctx.beginPath();
+            ctx.moveTo(0, -20);
+            ctx.lineTo(14, 20);
+            ctx.lineTo(-14, 20);
+            ctx.closePath();
+            ctx.fillStyle = "white";
+            ctx.fill();
+            ctx.strokeStyle = "white";
+            ctx.stroke();
+          } else {
+            // Nave normal
+            ctx.beginPath();
+            ctx.moveTo(0, -20);
+            ctx.lineTo(14, 20);
+            ctx.lineTo(-14, 20);
+            ctx.closePath();
+            ctx.fillStyle = IS_SHIELDED ? "white" : "rgba(0,0,0,0)";
+            ctx.fill();
+            ctx.strokeStyle = "white";
+            ctx.stroke();
+          }
+
+          ctx.restore();
+
+          if (IS_SHIELDED) {
+            ctx.beginPath();
+            ctx.arc(ship.x, ship.y, 40, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(71, 128, 181, 0.4)";
+            ctx.fill();
+            ctx.stroke();
+          }
+        }
+
+        bullets.forEach((b) => {
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, 2, 0, Math.PI * 2);
+          ctx.fillStyle = "white";
+          ctx.fill();
+        });
+
+        enemies.forEach((e) => {
+          ctx.save();
+          ctx.translate(e.x, e.y);
+          ctx.rotate((e.angle * Math.PI) / 180);
+          ctx.beginPath();
+          ctx.moveTo(0, -18); // topo (ponta da seta)
+          ctx.lineTo(16, 18); // canto inferior direito
+          ctx.lineTo(0, 10); // entalhe central
+          ctx.lineTo(-16, 18);
+          ctx.closePath();
+          ctx.strokeStyle = IS_GAMEOVER
+            ? "rgba(255,255,255,0.3)"
+            : IS_INVULNERABLE && BLINKSTATE
+            ? "white"
+            : "red";
+          ctx.stroke();
+          ctx.restore();
+        });
+
+        if (!IS_DEAD) {
+          enemyBullets.forEach((b) => {
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, 2, 0, Math.PI * 2);
+            ctx.fillStyle = IS_INVULNERABLE && BLINKSTATE ? "white" : "red";
+            ctx.fill();
+          });
+        }
+
+        explosions.forEach((p) => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 1, 0, Math.PI * 2);
+          ctx.fillStyle = p.color;
+          ctx.fill();
+        });
+      }
+
+      function showGameOverScreen() {
+        const pulseAlpha = 0.2 + 0.8 * Math.abs(Math.sin(promptTime));
+
+        ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.font = "40px monospace";
+        ctx.fillStyle = "white";
+        ctx.textAlign = "center";
+        ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 20);
+
+        ctx.font = "20px monospace";
+        ctx.fillText(
+          `Placar final: ${SCORE}`,
+          canvas.width / 2,
+          canvas.height / 2 + 10
+        );
+
+        ctx.font = "12px monospace";
+        ctx.fillStyle = `rgba(255,255,255,${pulseAlpha})`;
+        ctx.fillText(
+          `Pressione ${CONFIRM_KEY.toUpperCase()} para reiniciar`,
+          canvas.width / 2,
+          canvas.height / 2 + 50
+        );
+
+        if (!FINAL_EXPLOSION_DONE) {
+          createExplosion(ship.x, ship.y, COLOR_EXPLOSION);
+          createExplosion(ship.x, ship.y, "yellow");
+          FINAL_EXPLOSION_DONE = true;
+        }
+      }
+
+      function joystickToKey(angleDeg, force) {
+        if (force < 0.1) return [];
+
+        const keys = [];
+
+        if (angleDeg >= 45 && angleDeg <= 135) keys.push("arrowdown");
+        if (angleDeg >= 225 && angleDeg <= 315) keys.push("arrowup");
+        if (angleDeg >= 135 && angleDeg <= 225) keys.push("arrowleft");
+        if (angleDeg <= 45 || angleDeg >= 315) keys.push("arrowright");
+
+        return keys;
+      }
+
+      function dispatchSyntheticKey(key, type = "keydown") {
+        const event = new KeyboardEvent(type, { key });
+        window.dispatchEvent(event);
       }
 
       function loop() {
@@ -152,50 +567,44 @@
         requestAnimationFrame(loop);
       }
 
-      function resizeCanvas() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-
-        ship.x = canvas.width / 2;
-        ship.y = canvas.height / 2;
-      }
-
       function initGame() {
         resizeCanvas();
-        ship.x = canvas.width / 2;
-        ship.y = canvas.height / 2;
+        bindInputEvents();
+        setInterval(spawnEnemy, ENEMY_SPAWN_INTERVAL);
+        window.addEventListener(`keydown:${CONFIRM_KEY}`, () => {
+          if (IS_GAMEOVER) window.location.reload();
+        });
+        window.addEventListener(`keydown:8`, () => {
+          if (IS_GAMEOVER) window.location.reload();
+        });
+        setInterval(() => {
+          blinkPrompt = !blinkPrompt;
+        }, 1000);
         loop();
       }
 
-      // Chama isso ao carregar
       window.addEventListener("load", initGame);
       window.addEventListener("resize", resizeCanvas);
 
-      window.addEventListener("keyboard", (e) => {
-        console.info("event::keyboard", e);
-        switch (e.detail.key) {
-          case "space":
-          case "5":
-            shoot();
-            break;
-          case "a":
-          case "arrowleft":
-            aKeyPulse += 2;
-            break;
-          case "d":
-          case "arrowright":
-            dKeyPulse += 2;
-            break;
+      window.addEventListener("joystick", (event) => {
+        const data = event.detail;
+
+        if (!data || !data.direction) {
+          pressedKeys["arrowup"] = false;
+          pressedKeys["arrowdown"] = false;
+          pressedKeys["arrowleft"] = false;
+          pressedKeys["arrowright"] = false;
+          return;
         }
+
+        // Atualiza os estados com base na direção do joystick
+        pressedKeys["arrowup"] = data.direction.y === "up";
+        pressedKeys["arrowdown"] = data.direction.y === "down";
+        pressedKeys["arrowleft"] = data.direction.x === "left";
+        pressedKeys["arrowright"] = data.direction.x === "right";
       });
     </script>
-    <script>
-      window.addEventListener("message", (event) => {
-        console.info("message:event", {
-          origin: event.origin,
-          data: event.data,
-        });
-      });
-    </script>
+
+    <script src="https://games-phi-henna.vercel.app/api/sdk"></script>
   </body>
 </html>
