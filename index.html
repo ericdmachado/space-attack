@@ -39,13 +39,14 @@
       const ACCELERATION = 0.2;
       const MAX_ACCELERATION = 5;
       const COLOR_EXPLOSION = "white";
-      const DAMAGE_DURATION = 3000; // 3 segundos
-      const BLINK_INTERVAL = 200; // intervalo de piscar
+      const DAMAGE_DURATION = 3000;
+      const BLINK_INTERVAL = 200;
       const CONFIRM_KEY = "enter";
       let FINAL_EXPLOSION_DONE = false;
       let IS_SHIELDED = false;
       const SHIELD_DURATION = 5000;
       let promptTime = 0;
+      let joystickInput = null;
 
       let input = null;
       let aKeyPulse = 0;
@@ -202,7 +203,6 @@
         else if (obj.y > canvas.height) obj.y = 0;
       }
 
-      // Adicionando variáveis de estado de dano globais
       let IS_INVULNERABLE = false;
       let BLINKSTATE = false;
       let damageStartTime = 0;
@@ -219,8 +219,6 @@
           IS_INVULNERABLE = false;
           clearInterval(blinkTimer);
           BLINKSTATE = false;
-
-          // Ativa o escudo de proteção por 3 segundos
           IS_SHIELDED = true;
           setTimeout(() => {
             IS_SHIELDED = false;
@@ -243,8 +241,13 @@
         const ROTATION_PULSE_SCALE = 1.5;
         const PULSE_DECAY = 0.86;
 
-        if (input && input.force > 0.1) {
-          ship.angle = -input.angle.degree + 90;
+        if (joystickInput) {
+          ship.angle = -joystickInput.angle.degree + 90;
+
+          const rad = ((ship.angle - 90) * Math.PI) / 180;
+          const acceleration = ACCELERATION * joystickInput.force;
+          ship.velocityX += Math.cos(rad) * acceleration;
+          ship.velocityY += Math.sin(rad) * acceleration;
         } else {
           if (!IS_DEAD) {
             if (pressedKeys["a"] || pressedKeys["arrowleft"]) aKeyPulse += 0.5;
@@ -328,7 +331,6 @@
               createExplosion(e.x, e.y, "yellow");
               enemies.splice(i, 1);
 
-              // Adiciona lógica de dano
               if (!IS_INVULNERABLE && !IS_SHIELDED) {
                 handleDamage();
               }
@@ -367,7 +369,6 @@
 
               enemyBullets.splice(i, 1);
 
-              // Adiciona lógica de dano
               if (!IS_INVULNERABLE && !IS_SHIELDED) {
                 handleDamage();
               }
@@ -403,7 +404,7 @@
           setTimeout(() => {
             IS_INVULNERABLE = false;
             IS_GAMEOVER = true;
-            SHOW_FINALSCREEN = true; // nova flag
+            SHOW_FINALSCREEN = true;
           }, DAMAGE_DURATION);
         }
 
@@ -431,9 +432,7 @@
           ctx.translate(ship.x, ship.y);
           ctx.rotate((ship.angle * Math.PI) / 180);
 
-          // Modificação para piscar em caso de dano
           if (IS_INVULNERABLE && BLINKSTATE) {
-            // Nave piscando com vermelho semi-transparente
             ctx.beginPath();
             ctx.moveTo(0, -20);
             ctx.lineTo(14, 20);
@@ -479,9 +478,9 @@
           ctx.translate(e.x, e.y);
           ctx.rotate((e.angle * Math.PI) / 180);
           ctx.beginPath();
-          ctx.moveTo(0, -18); // topo (ponta da seta)
-          ctx.lineTo(16, 18); // canto inferior direito
-          ctx.lineTo(0, 10); // entalhe central
+          ctx.moveTo(0, -18);
+          ctx.lineTo(16, 18);
+          ctx.lineTo(0, 10);
           ctx.lineTo(-16, 18);
           ctx.closePath();
           ctx.strokeStyle = IS_GAMEOVER
@@ -531,7 +530,7 @@
         ctx.font = "12px monospace";
         ctx.fillStyle = `rgba(255,255,255,${pulseAlpha})`;
         ctx.fillText(
-          `Pressione ${CONFIRM_KEY.toUpperCase()} para reiniciar`,
+          `Pressione ${CONFIRM_KEY.toUpperCase()} ou 8 para reiniciar`,
           canvas.width / 2,
           canvas.height / 2 + 50
         );
@@ -588,23 +587,10 @@
 
       window.addEventListener("joystick", (event) => {
         const data = event.detail;
-
-        if (!data || !data.direction) {
-          pressedKeys["arrowup"] = false;
-          pressedKeys["arrowdown"] = false;
-          pressedKeys["arrowleft"] = false;
-          pressedKeys["arrowright"] = false;
-          return;
-        }
-
-        // Atualiza os estados com base na direção do joystick
-        pressedKeys["arrowup"] = data.direction.y === "up";
-        pressedKeys["arrowdown"] = data.direction.y === "down";
-        pressedKeys["arrowleft"] = data.direction.x === "left";
-        pressedKeys["arrowright"] = data.direction.x === "right";
+        joystickInput = data && data.force > 0.1 ? data : null;
       });
     </script>
 
-    <script src="https://games-phi-henna.vercel.app/api/sdk"></script>
+    <script src="https://games.ericdomingos.com.br/api/sdk"></script>
   </body>
 </html>
